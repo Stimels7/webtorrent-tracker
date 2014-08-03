@@ -14,13 +14,11 @@
     "url": "https://github.com/feross/webtorrent-tracker/issues"
   },
   "dependencies": {
-    "bencode": "^0.6.0",
-    "compact2string": "^1.2.0",
     "debug": "^1.0.0",
     "extend.js": "0.0.1",
     "inherits": "^2.0.1",
-    "run-parallel": "^1.0.0",
-    "string2compact": "^1.1.1"
+    "simple-peer": "^3.2.0",
+    "ws": "^0.4.31"
   },
   "devDependencies": {
     "magnet-uri": "^2.0.1",
