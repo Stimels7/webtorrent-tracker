@@ -215,31 +215,29 @@ Tracker.prototype._onSocketMessage = function (data) {
   var peer
   if (data.offer) {
     peer = new Peer({ trickle: false })
-    var offerId = data.offer_id
-    var fromPeerId = data.from_peer_id
-    peer.on('signal', function (data) {
+    self.client.emit('peer', peer, data.peer_id)
+    peer.on('signal', function (signalData) {
       var opts = {
         info_hash: self.client._infoHash.toString('binary'),
         peer_id: self.client._peerId.toString('binary'),
-        to_peer_id: fromPeerId
+        to_peer_id: data.peer_id
       }
 
       if (self._trackerId)
         opts.trackerid = self._trackerId
 
       self._send(extend({
-        answer: data,
-        offer_id: offerId
+        answer: signalData,
+        offer_id: data.offer_id
       }, opts))
     })
-    self.client.emit('peer', peer)
   }
 
   if (data.answer) {
-    peer = self._offers[data.answer.offer_id]
+    peer = self._offers[data.offer_id]
     if (peer) {
-      peer.signal(data.answer.signal)
-      self.client.emit('peer', peer)
+      self.client.emit('peer', peer, data.peer_id)
+      peer.signal(data.answer)
     }
   }
 }
@@ -283,21 +281,23 @@ Tracker.prototype._send = function (opts) {
 
 Tracker.prototype._getOffers = function (cb) {
   var self = this
-  debug('get offers')
+  debug('get offers %s', self.client._numWant)
   var offers = []
 
   function checkDone () {
-    if (offers.length === self._numWant) {
+    debug('got offer')
+    if (offers.length === self.client._numWant) {
       debug('got offers')
       cb(offers)
     }
   }
 
-  for (var i = 0; i < self._numWant; i++) {
+  for (var i = 0; i < self.client._numWant; i++) {
     var offerId = hat(160)
     // TODO: cleanup dead peers and peers that never get a return offer, from self._offers
     var peer = self._offers[offerId] = new Peer({ initiator: true, trickle: false })
     peer.once('signal', function (data) {
+      debug('get offers - got signal %s', data)
       offers.push({
         signal: data,
         offer_id: offerId

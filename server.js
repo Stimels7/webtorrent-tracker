@@ -11,18 +11,17 @@ var MAX_ANNOUNCE_PEERS = 20
 inherits(Server, EventEmitter)
 
 /**
- * A BitTorrent tracker server.
+ * A WebTorrent tracker server.
  *
- * A "BitTorrent tracker" is an HTTP service which responds to GET requests from
- * BitTorrent clients. The requests include metrics from clients that help the tracker
- * keep overall statistics about the torrent. The response includes a peer list that
- * helps the client participate in the torrent.
+ * A "WebTorrent tracker" is an HTTP/WebSocket service which responds to requests from
+ * WebTorrent/WebRTC clients. The requests include metrics from clients that help the
+ * tracker keep overall statistics about the torrent. Unlike a traditional BitTorrent
+ * tracker, a WebTorrent tracker maintains an open connection to each peer in a swarm.
+ * This is necessary to facilitate the WebRTC signaling (peer introduction) process.
  *
- * @param {Object}  opts            options
+ * @param {Object}  opts            options object
+ * @param {Number}  opts.server     use existing http server
  * @param {Number}  opts.interval   interval in ms that clients should announce on
- * @param {Number}  opts.trustProxy Trust 'x-forwarded-for' header from reverse proxy
- * @param {boolean} opts.http       Start an http server? (default: true)
- * @param {boolean} opts.udp        Start a udp server? (default: true)
  */
 function Server (opts) {
   var self = this
@@ -34,14 +33,17 @@ function Server (opts) {
     ? opts.interval / 1000
     : 10 * 60 // 10 min (in secs)
 
+  debug('new server %s', JSON.stringify(opts))
+
+  self.port = null
   self.torrents = {}
 
-  self._httpServer = http.createServer()
-  self._socketServer = new WebSocketServer({ server: self._httpServer })
-  // self._httpServer.on('request', self._onHttpRequest.bind(self))
+  self._httpServer = opts.server || http.createServer()
   self._httpServer.on('error', self._onError.bind(self))
-  self._socketServer.on('error', self._onError.bind(self))
+  self._httpServer.on('listening', self._onListening.bind(self))
 
+  self._socketServer = new WebSocketServer({ server: self._httpServer })
+  self._socketServer.on('error', self._onError.bind(self))
   self._socketServer.on('connection', function (socket) {
     socket.onSend = self._onSocketSend.bind(self, socket)
     socket.on('message', self._onSocketMessage.bind(self, socket))
@@ -50,24 +52,29 @@ function Server (opts) {
   })
 }
 
+Server.prototype._onListening = function () {
+  var self = this
+  debug('listening %s', self.port)
+  self.emit('listening', self.port)
+}
+
 Server.prototype._onError = function (err) {
   var self = this
+  debug('error %s', err.message || err)
   self.emit('error', err)
 }
 
 Server.prototype.listen = function (port, onlistening) {
   var self = this
-
+  debug('listen %s', port)
+  self.port = port
   if (onlistening) self.once('listening', onlistening)
-
-  self._httpServer.listen(port, function (err) {
-    if (err) return self.emit('error', err)
-    self.emit('listening', port)
-  })
+  self._httpServer.listen(port)
 }
 
 Server.prototype.close = function (cb) {
   var self = this
+  debug('close')
   self._httpServer.close(cb)
 }
 
@@ -101,6 +108,7 @@ Server.prototype._onSocketMessage = function (socket, data) {
     return error('invalid socket message')
   }
 
+
   var warning
   var infoHash = typeof data.info_hash === 'string' && data.info_hash
   var peerId = typeof data.peer_id === 'string' && binaryToUtf8(data.peer_id)
@@ -110,13 +118,10 @@ Server.prototype._onSocketMessage = function (socket, data) {
   if (!peerId) return error('invalid peer_id')
   if (peerId.length !== 20) return error('invalid peer_id')
 
+  debug('received %s from %s', data, peerId)
+
   var swarm = self._getSwarm(infoHash)
   var peer = swarm.peers[peerId]
-
-  var numWant = Math.min(
-    Number(data.offers && data.offers.length) || 0,
-    MAX_ANNOUNCE_PEERS
-  )
 
   switch (data.event) {
     case 'started':
@@ -181,45 +186,47 @@ Server.prototype._onSocketMessage = function (socket, data) {
       self.emit('update')
       break
 
-    case 'answered':
-      if (!peer) {
-        warning = 'unexpected `answered` event from peer that is not in swarm'
-        break
-      }
-
-      var toPeerId = typeof data.to_peer_id === 'string' && data.to_peer_id
-      if (!toPeerId) return error('invalid `to_peer_id`')
-      var toPeer = swarm.peers[toPeerId]
-      if (!toPeer) return self.emit('warning', new Error('no peer with that `to_peer_id`'))
-      var answer = typeof data.answer === 'string' && data.answer
-
-      toPeer.socket.send(answer)
-
-      self.emit('answer')
-      return // early return
-
     default:
       return error('invalid event') // early return
   }
 
-  var response = {
+  var response = JSON.stringify({
     complete: swarm.complete,
     incomplete: swarm.incomplete,
     interval: self._intervalMs
+  })
+  if (warning) response['warning message'] = warning
+
+  socket.send(response, socket.onSend)
+  debug('sent response %s', response)
+
+  var numWant = Math.min(
+    Number(data.offers && data.offers.length) || 0,
+    MAX_ANNOUNCE_PEERS
+  )
+  if (numWant) {
+    debug('got offers %s', data.offers)
+    var peers = self._getPeers(swarm, numWant)
+    peers.forEach(function (peer, i) {
+      peer.socket.send({
+        offer: data.offers[i],
+        peer_id: peerId
+      })
+    })
   }
 
-  if (warning)
-    response['warning message'] = warning
-  socket.send(JSON.stringify(response), socket.onSend)
-  debug('sent response %s', JSON.stringify(response))
+  if (data.answer) {
+    debug('got answer %s', data.answer)
+    var toPeerId = typeof data.to_peer_id === 'string' && data.to_peer_id
+    if (!toPeerId) return error('invalid `to_peer_id`')
+    var toPeer = swarm.peers[toPeerId]
+    if (!toPeer) return self.emit('warning', new Error('no peer with that `to_peer_id`'))
 
-  var peers = self._getPeers(swarm, numWant)
-  peers.forEach(function (peer, i) {
-    peer.socket.send({
-      offer: data.offers[i],
-      from_peer_id: peerId
+    toPeer.socket.send({
+      answer: data.answer,
+      offer_id: data.offer_id
     })
-  })
+  }
 
   function error (message) {
     debug('sent error %s', message)
@@ -260,6 +267,14 @@ Server.prototype._onSocketClose = function (socket) {
   //   sockets.splice(index, 1)
   //   self.sendUpdates(url)
   // }
+}
+
+Server.prototype._onSocketError = function (err) {
+  var self = this
+  debug('socket error %s', err.message || err)
+
+  // TODO
+
 }
 
 function binaryToUtf8 (str) {
