@@ -16,6 +16,7 @@
   "dependencies": {
     "debug": "^1.0.0",
     "extend.js": "0.0.1",
+    "hat": "0.0.3",
     "inherits": "^2.0.1",
     "simple-peer": "^3.2.0",
     "ws": "^0.4.31"
