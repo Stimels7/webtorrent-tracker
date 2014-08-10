@@ -8,6 +8,8 @@ var inherits = require('inherits')
 var Peer = require('simple-peer')
 var Socket = require('simple-websocket')
 
+var DEFAULT_NUM_WANT = 3
+
 inherits(Client, EventEmitter)
 
 /**
@@ -35,7 +37,7 @@ function Client (peerId, torrent, opts) {
   self.torrentLength = torrent.length
 
   // optional
-  self._numWant = self._opts.numWant || 10
+  self._numWant = self._opts.numWant || DEFAULT_NUM_WANT
   self._intervalMs = self._opts.interval || (30 * 60 * 1000) // default: 30 minutes
 
   debug('new client %s', self._infoHash.toString('hex'))
@@ -135,7 +137,7 @@ Tracker.prototype.stop = function (opts) {
   self._announce(opts)
   self.setInterval(0) // stop announcing on intervals
 
-  // TODO: close the websocket
+  // TODO: destroy the websocket
 }
 
 Tracker.prototype.complete = function (opts) {
@@ -161,7 +163,8 @@ Tracker.prototype._init = function (onready) {
   if (onready) self.once('ready', onready)
   if (self._socket) return
 
-  self._socket = new Socket(self._announceUrl)
+  // TODO: reconnect when socket disconnects
+  self._socket = new Socket(self._announceUrl, { reconnect: false })
   self._socket.on('ready', self._onSocketReady.bind(self))
   self._socket.on('warning', self._onSocketWarning.bind(self))
   self._socket.on('message', self._onSocketMessage.bind(self))
@@ -179,6 +182,8 @@ Tracker.prototype._onSocketWarning = function (err) {
 
 Tracker.prototype._onSocketMessage = function (data) {
   var self = this
+
+  console.log(data)
 
   if (!(typeof data === 'object' && data !== null))
     return self.client.emit('error', new Error('Invalid tracker response'))
@@ -214,9 +219,10 @@ Tracker.prototype._onSocketMessage = function (data) {
 
   var peer
   if (data.offer) {
+    console.log('got offer', data.offer)
     peer = new Peer({ trickle: false })
-    self.client.emit('peer', peer, data.peer_id)
-    peer.on('signal', function (signalData) {
+    self.client.emit('peer', peer, binaryToHex(data.peer_id))
+    peer.once('signal', function (answer) {
       var opts = {
         info_hash: self.client._infoHash.toString('binary'),
         peer_id: self.client._peerId.toString('binary'),
@@ -227,10 +233,11 @@ Tracker.prototype._onSocketMessage = function (data) {
         opts.trackerid = self._trackerId
 
       self._send(extend({
-        answer: signalData,
+        answer: answer,
         offer_id: data.offer_id
       }, opts))
     })
+    peer.signal(data.offer)
   }
 
   if (data.answer) {
@@ -285,9 +292,8 @@ Tracker.prototype._getOffers = function (cb) {
   var offers = []
 
   function checkDone () {
-    debug('got offer')
     if (offers.length === self.client._numWant) {
-      debug('got offers')
+      debug('got offers %s', self.client._numWant)
       cb(offers)
     }
   }
@@ -296,10 +302,9 @@ Tracker.prototype._getOffers = function (cb) {
     var offerId = hat(160)
     // TODO: cleanup dead peers and peers that never get a return offer, from self._offers
     var peer = self._offers[offerId] = new Peer({ initiator: true, trickle: false })
-    peer.once('signal', function (data) {
-      debug('get offers - got signal %s', data)
+    peer.once('signal', function (offer) {
       offers.push({
-        signal: data,
+        offer: offer,
         offer_id: offerId
       })
       checkDone()
@@ -315,4 +320,8 @@ Tracker.prototype.setInterval = function (intervalMs) {
   if (intervalMs) {
     self._interval = setInterval(self.update.bind(self), self._intervalMs)
   }
+}
+
+function binaryToHex (id) {
+  return new Buffer(id, 'binary').toString('hex')
 }

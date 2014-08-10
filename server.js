@@ -45,23 +45,12 @@ function Server (opts) {
   self._socketServer = new WebSocketServer({ server: self._httpServer })
   self._socketServer.on('error', self._onError.bind(self))
   self._socketServer.on('connection', function (socket) {
+    socket.id = null
     socket.onSend = self._onSocketSend.bind(self, socket)
     socket.on('message', self._onSocketMessage.bind(self, socket))
     socket.on('error', self._onSocketError.bind(self, socket))
     socket.on('close', self._onSocketClose.bind(self, socket))
   })
-}
-
-Server.prototype._onListening = function () {
-  var self = this
-  debug('listening %s', self.port)
-  self.emit('listening', self.port)
-}
-
-Server.prototype._onError = function (err) {
-  var self = this
-  debug('error %s', err.message || err)
-  self.emit('error', err)
 }
 
 Server.prototype.listen = function (port, onlistening) {
@@ -76,6 +65,18 @@ Server.prototype.close = function (cb) {
   var self = this
   debug('close')
   self._httpServer.close(cb)
+}
+
+Server.prototype._onListening = function () {
+  var self = this
+  debug('listening %s', self.port)
+  self.emit('listening', self.port)
+}
+
+Server.prototype._onError = function (err) {
+  var self = this
+  debug('error %s', err.message || err)
+  self.emit('error', err)
 }
 
 Server.prototype.getSwarm = function (infoHash) {
@@ -108,18 +109,17 @@ Server.prototype._onSocketMessage = function (socket, data) {
     return error('invalid socket message')
   }
 
+  var peerId = typeof data.peer_id === 'string' && data.peer_id
+  if (!peerId || peerId.length !== 20) return error('invalid peer_id')
+
+  var infoHash = typeof data.info_hash === 'string' && data.info_hash
+  if (!infoHash || infoHash.length !== 20) return error('invalid info_hash')
+
+  debug('received %s from %s', JSON.stringify(data), binaryToHex(peerId))
+  if (!socket.id) socket.id = peerId
+  if (!socket.infoHash) socket.infoHash = infoHash
 
   var warning
-  var infoHash = typeof data.info_hash === 'string' && data.info_hash
-  var peerId = typeof data.peer_id === 'string' && binaryToUtf8(data.peer_id)
-
-  if (!infoHash) return error('invalid info_hash')
-  if (infoHash.length !== 20) return error('invalid info_hash')
-  if (!peerId) return error('invalid peer_id')
-  if (peerId.length !== 20) return error('invalid peer_id')
-
-  debug('received %s from %s', data, peerId)
-
   var swarm = self._getSwarm(infoHash)
   var peer = swarm.peers[peerId]
 
@@ -138,7 +138,7 @@ Server.prototype._onSocketMessage = function (socket, data) {
 
       swarm.peers[peerId] = {
         socket: socket,
-        peerId: peerId
+        id: peerId
       }
       self.emit('start')
       break
@@ -198,34 +198,40 @@ Server.prototype._onSocketMessage = function (socket, data) {
   if (warning) response['warning message'] = warning
 
   socket.send(response, socket.onSend)
-  debug('sent response %s', response)
+  debug('sent response %s to %s', response, binaryToHex(peerId))
 
   var numWant = Math.min(
     Number(data.offers && data.offers.length) || 0,
     MAX_ANNOUNCE_PEERS
   )
   if (numWant) {
-    debug('got offers %s', data.offers)
+    debug('got %s offers', data.offers.length)
     var peers = self._getPeers(swarm, numWant)
+    debug('got %s peers from swarm %s', peers.length, binaryToHex(infoHash))
     peers.forEach(function (peer, i) {
-      peer.socket.send({
-        offer: data.offers[i],
+      if (peer.id === peerId) return // ignore self
+      peer.socket.send(JSON.stringify({
+        offer: data.offers[i].offer,
+        offer_id: data.offers[i].offer_id,
         peer_id: peerId
-      })
+      }))
+      debug('sent offer to %s from %s', binaryToHex(peer.id), binaryToHex(peerId))
     })
   }
 
   if (data.answer) {
-    debug('got answer %s', data.answer)
+    debug('got answer %s from %s', data.answer, binaryToHex(peerId))
     var toPeerId = typeof data.to_peer_id === 'string' && data.to_peer_id
     if (!toPeerId) return error('invalid `to_peer_id`')
     var toPeer = swarm.peers[toPeerId]
     if (!toPeer) return self.emit('warning', new Error('no peer with that `to_peer_id`'))
 
-    toPeer.socket.send({
+    toPeer.socket.send(JSON.stringify({
       answer: data.answer,
-      offer_id: data.offer_id
-    })
+      offer_id: data.offer_id,
+      peer_id: peerId
+    }))
+    debug('sent answer to %s for %s', binaryToHex(toPeer.id), binaryToHex(peerId))
   }
 
   function error (message) {
@@ -259,24 +265,20 @@ Server.prototype._onSocketSend = function (socket, err) {
 
 Server.prototype._onSocketClose = function (socket) {
   var self = this
+  debug('on socket close')
+  if (!socket.id || !socket.infoHash) return
 
-  // var sockets = self.online[url]
-
-  // if (sockets) {
-  //   var index = sockets.indexOf(socket)
-  //   sockets.splice(index, 1)
-  //   self.sendUpdates(url)
-  // }
+  var swarm = self.torrents[socket.infoHash]
+  if (swarm) swarm.peers[socket.id] = null
 }
 
-Server.prototype._onSocketError = function (err) {
+Server.prototype._onSocketError = function (socket, err) {
   var self = this
   debug('socket error %s', err.message || err)
-
-  // TODO
-
+  self.emit('warning', err)
+  self._onSocketClose(socket)
 }
 
-function binaryToUtf8 (str) {
-  return new Buffer(str, 'binary').toString('utf8')
+function binaryToHex (id) {
+  return new Buffer(id, 'binary').toString('hex')
 }
