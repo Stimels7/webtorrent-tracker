@@ -183,10 +183,10 @@ Tracker.prototype._onSocketWarning = function (err) {
 Tracker.prototype._onSocketMessage = function (data) {
   var self = this
 
-  console.log(data)
-
   if (!(typeof data === 'object' && data !== null))
     return self.client.emit('error', new Error('Invalid tracker response'))
+
+  debug('received %s from %s', JSON.stringify(data), self._announceUrl)
 
   var failure = data['failure reason']
   if (failure)
@@ -219,7 +219,6 @@ Tracker.prototype._onSocketMessage = function (data) {
 
   var peer
   if (data.offer) {
-    console.log('got offer', data.offer)
     peer = new Peer({ trickle: false })
     self.client.emit('peer', peer, binaryToHex(data.peer_id))
     peer.once('signal', function (answer) {
