@@ -6,7 +6,7 @@ var extend = require('extend.js')
 var hat = require('hat')
 var inherits = require('inherits')
 var Peer = require('simple-peer')
-var Socket = require('./lib/socket')
+var Socket = require('simple-websocket')
 
 inherits(Client, EventEmitter)
 
