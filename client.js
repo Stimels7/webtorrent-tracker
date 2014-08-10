@@ -243,7 +243,7 @@ Tracker.prototype._onSocketMessage = function (data) {
   if (data.answer) {
     peer = self._offers[data.offer_id]
     if (peer) {
-      self.client.emit('peer', peer, data.peer_id)
+      self.client.emit('peer', peer, binaryToHex(data.peer_id))
       peer.signal(data.answer)
     }
   }
