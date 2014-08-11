@@ -111,11 +111,13 @@ Server.prototype._onSocketMessage = function (socket, data) {
 
   var peerId = typeof data.peer_id === 'string' && data.peer_id
   if (!peerId || peerId.length !== 20) return error('invalid peer_id')
+  var peerIdHex = binaryToHex(peerId)
 
   var infoHash = typeof data.info_hash === 'string' && data.info_hash
   if (!infoHash || infoHash.length !== 20) return error('invalid info_hash')
+  var infoHashHex = binaryToHex(infoHash)
 
-  debug('received %s from %s', JSON.stringify(data), binaryToHex(peerId))
+  debug('received %s from %s', JSON.stringify(data), peerIdHex)
   if (!socket.id) socket.id = peerId
   if (!socket.infoHash) socket.infoHash = infoHash
 
@@ -198,29 +200,28 @@ Server.prototype._onSocketMessage = function (socket, data) {
   if (warning) response['warning message'] = warning
 
   socket.send(response, socket.onSend)
-  debug('sent response %s to %s', response, binaryToHex(peerId))
+  debug('sent response %s to %s', response, peerIdHex)
 
   var numWant = Math.min(
     Number(data.offers && data.offers.length) || 0,
     MAX_ANNOUNCE_PEERS
   )
   if (numWant) {
-    debug('got %s offers', data.offers.length)
-    var peers = self._getPeers(swarm, numWant)
-    debug('got %s peers from swarm %s', peers.length, binaryToHex(infoHash))
+    debug('got offers %s from %s', JSON.stringify(data.offers), peerIdHex)
+    var peers = self._getPeers(swarm, numWant, peerId)
+    debug('got %s peers from swarm %s', peers.length, infoHashHex)
     peers.forEach(function (peer, i) {
-      if (peer.id === peerId) return // ignore self
       peer.socket.send(JSON.stringify({
         offer: data.offers[i].offer,
         offer_id: data.offers[i].offer_id,
         peer_id: peerId
       }))
-      debug('sent offer to %s from %s', binaryToHex(peer.id), binaryToHex(peerId))
+      debug('sent offer to %s from %s', binaryToHex(peer.id), peerIdHex)
     })
   }
 
   if (data.answer) {
-    debug('got answer %s from %s', data.answer, binaryToHex(peerId))
+    debug('got answer %s from %s', JSON.stringify(data.answer), peerIdHex)
     var toPeerId = typeof data.to_peer_id === 'string' && data.to_peer_id
     if (!toPeerId) return error('invalid `to_peer_id`')
     var toPeer = swarm.peers[toPeerId]
@@ -231,7 +232,7 @@ Server.prototype._onSocketMessage = function (socket, data) {
       offer_id: data.offer_id,
       peer_id: peerId
     }))
-    debug('sent answer to %s for %s', binaryToHex(toPeer.id), binaryToHex(peerId))
+    debug('sent answer to %s from %s', binaryToHex(toPeer.id), peerIdHex)
   }
 
   function error (message) {
@@ -244,13 +245,14 @@ Server.prototype._onSocketMessage = function (socket, data) {
 }
 
 // TODO: randomize the peers that are given out
-Server.prototype._getPeers = function (swarm, numWant) {
+Server.prototype._getPeers = function (swarm, numWant, fromPeerId) {
   var peers = []
   for (var peerId in swarm.peers) {
     if (peers.length >= numWant) break
+    if (peerId === fromPeerId) continue // skip self
     var peer = swarm.peers[peerId]
-    if (!peer) continue // ignore null values
-    peers.push(peer)
+    if (!peer) continue
+    peers.push(peer) // ignore null values
   }
   return peers
 }
