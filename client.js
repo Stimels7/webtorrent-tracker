@@ -5,6 +5,7 @@ var EventEmitter = require('events').EventEmitter
 var extend = require('extend.js')
 var hat = require('hat')
 var inherits = require('inherits')
+var times = require('lodash.times')
 var Peer = require('simple-peer')
 var Socket = require('simple-websocket')
 
@@ -106,7 +107,7 @@ function Tracker (client, announceUrl, opts) {
   EventEmitter.call(self)
   self._opts = opts || {}
   self._announceUrl = announceUrl
-  self._offers = {}
+  self._peers = {} // peers (offer id -> peer)
 
   debug('new tracker %s', announceUrl)
 
@@ -220,7 +221,6 @@ Tracker.prototype._onSocketMessage = function (data) {
   var peer
   if (data.offer) {
     peer = new Peer({ trickle: false })
-    self.client.emit('peer', peer, binaryToHex(data.peer_id))
     peer.once('signal', function (answer) {
       var opts = {
         info_hash: self.client._infoHash.toString('binary'),
@@ -237,13 +237,14 @@ Tracker.prototype._onSocketMessage = function (data) {
       }, opts))
     })
     peer.signal(data.offer)
+    self.client.emit('peer', peer, binaryToHex(data.peer_id))
   }
 
   if (data.answer) {
-    peer = self._offers[data.offer_id]
+    peer = self._peers[data.offer_id]
     if (peer) {
-      self.client.emit('peer', peer, binaryToHex(data.peer_id))
       peer.signal(data.answer)
+      self.client.emit('peer', peer, binaryToHex(data.peer_id))
     }
   }
 }
@@ -259,7 +260,7 @@ Tracker.prototype._announce = function (opts) {
   var self = this
   if (!self.ready) return self._init(self._announce.bind(self, opts))
 
-  self._getOffers(function (offers) {
+  self._generateOffers(function (offers) {
     opts = extend({
       uploaded: 0, // default, user should provide real value
       downloaded: 0, // default, user should provide real value
@@ -285,7 +286,7 @@ Tracker.prototype._send = function (opts) {
   self._socket.send(opts)
 }
 
-Tracker.prototype._getOffers = function (cb) {
+Tracker.prototype._generateOffers = function (cb) {
   var self = this
   debug('get offers %s', self.client._numWant)
   var offers = []
@@ -297,10 +298,10 @@ Tracker.prototype._getOffers = function (cb) {
     }
   }
 
-  for (var i = 0; i < self.client._numWant; i++) {
+  // TODO: cleanup dead peers and peers that never get a return offer, from self._peers
+  times(self.client._numWant, function (i) {
     var offerId = hat(160)
-    // TODO: cleanup dead peers and peers that never get a return offer, from self._offers
-    var peer = self._offers[offerId] = new Peer({ initiator: true, trickle: false })
+    var peer = self._peers[offerId] = new Peer({ initiator: true, trickle: false })
     peer.once('signal', function (offer) {
       offers.push({
         offer: offer,
@@ -308,7 +309,7 @@ Tracker.prototype._getOffers = function (cb) {
       })
       checkDone()
     })
-  }
+  })
 }
 
 Tracker.prototype.setInterval = function (intervalMs) {
