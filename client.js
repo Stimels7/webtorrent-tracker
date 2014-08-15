@@ -164,8 +164,7 @@ Tracker.prototype._init = function (onready) {
   if (onready) self.once('ready', onready)
   if (self._socket) return
 
-  // TODO: reconnect when socket disconnects
-  self._socket = new Socket(self._announceUrl, { reconnect: false })
+  self._socket = new Socket(self._announceUrl)
   self._socket.on('ready', self._onSocketReady.bind(self))
   self._socket.on('warning', self._onSocketWarning.bind(self))
   self._socket.on('message', self._onSocketMessage.bind(self))
