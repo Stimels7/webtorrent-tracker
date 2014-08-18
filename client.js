@@ -165,8 +165,9 @@ Tracker.prototype._init = function (onready) {
   if (self._socket) return
 
   self._socket = new Socket(self._announceUrl)
-  self._socket.on('ready', self._onSocketReady.bind(self))
   self._socket.on('warning', self._onSocketWarning.bind(self))
+  self._socket.on('error', self._onSocketWarning.bind(self))
+  self._socket.on('ready', self._onSocketReady.bind(self))
   self._socket.on('message', self._onSocketMessage.bind(self))
 }
 
@@ -184,7 +185,7 @@ Tracker.prototype._onSocketMessage = function (data) {
   var self = this
 
   if (!(typeof data === 'object' && data !== null))
-    return self.client.emit('error', new Error('Invalid tracker response'))
+    return self.client.emit('warning', new Error('Invalid tracker response'))
 
   debug('received %s from %s', JSON.stringify(data), self._announceUrl)
 
