@@ -218,6 +218,7 @@ Tracker.prototype._onSocketMessage = function (data) {
   var peer
   if (data.offer) {
     peer = new Peer({ trickle: false })
+    peer.id = binaryToHex(data.peer_id)
     peer.once('signal', function (answer) {
       var opts = {
         info_hash: self.client._infoHash.toString('binary'),
@@ -234,14 +235,14 @@ Tracker.prototype._onSocketMessage = function (data) {
       }, opts))
     })
     peer.signal(data.offer)
-    self.client.emit('peer', peer, binaryToHex(data.peer_id))
+    self.client.emit('peer', peer)
   }
 
   if (data.answer) {
     peer = self._peers[data.offer_id]
     if (peer) {
       peer.signal(data.answer)
-      self.client.emit('peer', peer, binaryToHex(data.peer_id))
+      self.client.emit('peer', peer)
     }
   }
 }
