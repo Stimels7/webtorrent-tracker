@@ -46,7 +46,7 @@ function Client (peerId, torrent, opts) {
   if (typeof torrent.announce === 'string') torrent.announce = [ torrent.announce ]
   self._trackers = (torrent.announce || [])
     .filter(function (announceUrl) {
-      return announceUrl.indexOf('ws://') === 0
+      return announceUrl.indexOf('ws://') === 0 || announceUrl.indexOf('wss://') === 0
     })
     .map(function (announceUrl) {
       return new Tracker(self, announceUrl, self._opts)
