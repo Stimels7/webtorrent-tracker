@@ -121,7 +121,7 @@ Tracker.prototype.start = function (opts) {
   opts = opts || {}
   opts.event = 'started'
 
-  debug('sent `start` %s', self._announceUrl)
+  debug('sent `start` %s %s', self._announceUrl, JSON.stringify(opts))
   self._announce(opts)
   self.setInterval(self._intervalMs) // start announcing on intervals
 }
@@ -131,7 +131,7 @@ Tracker.prototype.stop = function (opts) {
   opts = opts || {}
   opts.event = 'stopped'
 
-  debug('sent `stop` %s', self._announceUrl)
+  debug('sent `stop` %s %s', self._announceUrl, JSON.stringify(opts))
   self._announce(opts)
   self.setInterval(0) // stop announcing on intervals
 
@@ -144,7 +144,7 @@ Tracker.prototype.complete = function (opts) {
   opts.event = 'completed'
   opts.downloaded = opts.downloaded || self.torrentLength || 0
 
-  debug('sent `complete` %s', self._announceUrl)
+  debug('sent `complete` %s %s', self._announceUrl, JSON.stringify(opts))
   self._announce(opts)
 }
 
@@ -152,7 +152,7 @@ Tracker.prototype.update = function (opts) {
   var self = this
   opts = opts || {}
 
-  debug('sent `update` %s', self._announceUrl)
+  debug('sent `update` %s %s', self._announceUrl, JSON.stringify(opts))
   self._announce(opts)
 }
 
@@ -297,7 +297,7 @@ Tracker.prototype._generateOffers = function (cb) {
   }
 
   // TODO: cleanup dead peers and peers that never get a return offer, from self._peers
-  times(self.client._numWant, function (i) {
+  times(self.client._numWant, function () {
     var offerId = hat(160)
     var peer = self._peers[offerId] = new Peer({ initiator: true, trickle: false })
     peer.once('signal', function (offer) {
