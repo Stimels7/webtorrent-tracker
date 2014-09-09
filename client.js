@@ -9,7 +9,7 @@ var times = require('lodash.times')
 var Peer = require('simple-peer')
 var Socket = require('simple-websocket')
 
-var DEFAULT_NUM_WANT = 3
+var DEFAULT_NUM_WANT = 15
 
 inherits(Client, EventEmitter)
 
