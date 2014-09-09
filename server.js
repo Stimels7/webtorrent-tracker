@@ -46,6 +46,7 @@ function Server (opts) {
   self._socketServer.on('error', self._onError.bind(self))
   self._socketServer.on('connection', function (socket) {
     socket.id = null
+    socket.infoHashes = []
     socket.onSend = self._onSocketSend.bind(self, socket)
     socket.on('message', self._onSocketMessage.bind(self, socket))
     socket.on('error', self._onSocketError.bind(self, socket))
@@ -119,7 +120,7 @@ Server.prototype._onSocketMessage = function (socket, data) {
 
   debug('received %s from %s', JSON.stringify(data), peerIdHex)
   if (!socket.id) socket.id = peerId
-  if (!socket.infoHash) socket.infoHash = infoHash
+  if (socket.infoHashes.indexOf(infoHash) === -1) socket.infoHashes.push(infoHash)
 
   var warning
   var swarm = self._getSwarm(infoHash)
@@ -195,7 +196,8 @@ Server.prototype._onSocketMessage = function (socket, data) {
   var response = JSON.stringify({
     complete: swarm.complete,
     incomplete: swarm.incomplete,
-    interval: self._intervalMs
+    interval: self._intervalMs,
+    info_hash: infoHash
   })
   if (warning) response['warning message'] = warning
 
@@ -214,7 +216,8 @@ Server.prototype._onSocketMessage = function (socket, data) {
       peer.socket.send(JSON.stringify({
         offer: data.offers[i].offer,
         offer_id: data.offers[i].offer_id,
-        peer_id: peerId
+        peer_id: peerId,
+        info_hash: infoHash
       }))
       debug('sent offer to %s from %s', binaryToHex(peer.id), peerIdHex)
     })
@@ -230,14 +233,18 @@ Server.prototype._onSocketMessage = function (socket, data) {
     toPeer.socket.send(JSON.stringify({
       answer: data.answer,
       offer_id: data.offer_id,
-      peer_id: peerId
+      peer_id: peerId,
+      info_hash: infoHash
     }))
     debug('sent answer to %s from %s', binaryToHex(toPeer.id), peerIdHex)
   }
 
   function error (message) {
     debug('sent error %s', message)
-    socket.send(JSON.stringify({ 'failure reason': message }), socket.onSend)
+    socket.send(JSON.stringify({
+      'failure reason': message,
+      info_hash: infoHash
+    }), socket.onSend)
     // even though it's an error for the client, it's just a warning for the server.
     // don't crash the server because a client sent bad data :)
     self.emit('warning', new Error(message))
@@ -268,10 +275,12 @@ Server.prototype._onSocketSend = function (socket, err) {
 Server.prototype._onSocketClose = function (socket) {
   var self = this
   debug('on socket close')
-  if (!socket.id || !socket.infoHash) return
+  if (!socket.id || !socket.infoHashes) return
 
-  var swarm = self.torrents[socket.infoHash]
-  if (swarm) swarm.peers[socket.id] = null
+  socket.infoHashes.forEach(function (infoHash) {
+    var swarm = self.torrents[infoHash]
+    if (swarm) swarm.peers[socket.id] = null
+  })
 }
 
 Server.prototype._onSocketError = function (socket, err) {

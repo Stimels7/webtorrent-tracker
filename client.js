@@ -13,6 +13,10 @@ var DEFAULT_NUM_WANT = 3
 
 inherits(Client, EventEmitter)
 
+// It turns out that you can't open multiple websockets to the same server within one
+// browser tab, so let's reuse them.
+var sockets = {}
+
 /**
  * A Client manages tracker connections for a torrent.
  *
@@ -161,10 +165,15 @@ Tracker.prototype._init = function (onready) {
   if (onready) self.once('ready', onready)
   if (self._socket) return
 
-  self._socket = new Socket(self._announceUrl)
+  if (sockets[self._announceUrl]) {
+    self._socket = sockets[self._announceUrl]
+    self._onSocketReady()
+  } else {
+    self._socket = sockets[self._announceUrl] = new Socket(self._announceUrl)
+    self._socket.on('ready', self._onSocketReady.bind(self))
+  }
   self._socket.on('warning', self._onSocketWarning.bind(self))
   self._socket.on('error', self._onSocketWarning.bind(self))
-  self._socket.on('ready', self._onSocketReady.bind(self))
   self._socket.on('message', self._onSocketMessage.bind(self))
 }
 
@@ -183,6 +192,9 @@ Tracker.prototype._onSocketMessage = function (data) {
 
   if (!(typeof data === 'object' && data !== null))
     return self.client.emit('warning', new Error('Invalid tracker response'))
+
+  if (data.info_hash !== self.client._infoHash.toString('binary'))
+    return
 
   debug('received %s from %s', JSON.stringify(data), self._announceUrl)
 
