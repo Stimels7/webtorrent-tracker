@@ -5,7 +5,6 @@ var EventEmitter = require('events').EventEmitter
 var extend = require('extend.js')
 var hat = require('hat')
 var inherits = require('inherits')
-var times = require('lodash.times')
 var Peer = require('simple-peer')
 var Socket = require('simple-websocket')
 
@@ -298,18 +297,15 @@ Tracker.prototype._send = function (opts) {
 
 Tracker.prototype._generateOffers = function (cb) {
   var self = this
-  debug('get offers %s', self.client._numWant)
   var offers = []
-
-  function checkDone () {
-    if (offers.length === self.client._numWant) {
-      debug('got offers %s', self.client._numWant)
-      cb(offers)
-    }
-  }
+  debug('generating %s offers', self.client._numWant)
 
   // TODO: cleanup dead peers and peers that never get a return offer, from self._peers
-  times(self.client._numWant, function () {
+  for (var i = 0; i < self.client._numWant; ++i) {
+    generateOffer()
+  }
+
+  function generateOffer () {
     var offerId = hat(160)
     var peer = self._peers[offerId] = new Peer({ initiator: true, trickle: false })
     peer.once('signal', function (offer) {
@@ -319,7 +315,15 @@ Tracker.prototype._generateOffers = function (cb) {
       })
       checkDone()
     })
-  })
+  }
+
+  function checkDone () {
+    console.log(offers.length)
+    if (offers.length === self.client._numWant) {
+      debug('generated %s offers', self.client._numWant)
+      cb(offers)
+    }
+  }
 }
 
 Tracker.prototype.setInterval = function (intervalMs) {
