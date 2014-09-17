@@ -318,7 +318,6 @@ Tracker.prototype._generateOffers = function (cb) {
   }
 
   function checkDone () {
-    console.log(offers.length)
     if (offers.length === self.client._numWant) {
       debug('generated %s offers', self.client._numWant)
       cb(offers)
